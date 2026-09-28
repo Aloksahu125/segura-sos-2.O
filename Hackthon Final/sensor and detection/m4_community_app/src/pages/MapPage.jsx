@@ -91,25 +91,95 @@ const M2_HAZARDS_URL = (lat, lng, r) => `${M2_HTTP_URL}/hazards?lat=${lat}&lng=$
 const M3_INCIDENTS   = `${M3_HTTP_URL}/incidents`;
 // const M3_WS_URL handled by config.js
 
-function createIcon(color) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="42" viewBox="0 0 25 41">
-    <path d="M12.5 0C5.6 0 0 5.6 0 12.5C0 22 12.5 41 12.5 41S25 22 25 12.5C25 5.6 19.4 0 12.5 0z" fill="${color}" stroke="#ffffff" stroke-width="2"/>
-    <circle cx="12.5" cy="12.5" r="5" fill="#ffffff" opacity="0.9"/>
+function createIcon(color, symbol) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="48" viewBox="0 0 32 48">
+    <path d="M16 0C7.2 0 0 7.2 0 16C0 28 16 48 16 48S32 28 32 16C32 7.2 24.8 0 16 0z"
+      fill="${color}" stroke="#ffffff" stroke-width="2.5" filter="url(#s)"/>
+    <circle cx="16" cy="16" r="9" fill="rgba(255,255,255,0.25)"/>
+    <text x="16" y="21" text-anchor="middle" font-size="13" fill="#ffffff" font-family="Arial,sans-serif">${symbol}</text>
+    <defs>
+      <filter id="s" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="rgba(0,0,0,0.4)"/>
+      </filter>
+    </defs>
   </svg>`;
   return L.divIcon({
-    html:      svg,
-    iconSize:  [26, 42],
-    iconAnchor:[13, 42],
-    popupAnchor:[0, -36],
-    className: ''
+    html:       svg,
+    iconSize:   [32, 48],
+    iconAnchor: [16, 48],
+    popupAnchor:[0, -44],
+    className:  ''
   });
 }
 
 const icons = {
-  severe:   createIcon('#d71921'),
-  moderate: createIcon('#ff9800'),
-  minor:    createIcon('#10b981'),
+  severe:   createIcon('#c0392b', '!'),
+  moderate: createIcon('#e67e22', '⚠'),
+  minor:    createIcon('#27ae60', '•'),
 };
+
+// 🟢 User GPS location — blue pulsing beacon (clearly NOT a crash)
+const userDivIcon = L.divIcon({
+  html: `
+    <div style="position:relative;width:28px;height:28px">
+      <div style="
+        position:absolute;inset:0;
+        border-radius:50%;
+        background:rgba(41,182,246,0.25);
+        animation:usrping 2s infinite;
+      "></div>
+      <div style="
+        position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+        width:16px;height:16px;border-radius:50%;
+        background:#29b6f6;
+        border:3px solid #ffffff;
+        box-shadow:0 0 8px rgba(41,182,246,0.9);
+      "></div>
+    </div>
+    <style>
+      @keyframes usrping{
+        0%  { transform:scale(1);   opacity:.8; }
+        50% { transform:scale(2.2); opacity:0;  }
+        100%{ transform:scale(1);   opacity:.8; }
+      }
+    </style>`,
+  iconSize:   [28, 28],
+  iconAnchor: [14, 14],
+  popupAnchor:[0, -18],
+  className:  ''
+});
+
+// 🚨 SOS alert — large bright red pulsing beacon
+const sosDivIcon = L.divIcon({
+  html: `
+    <div style="position:relative;width:36px;height:36px">
+      <div style="
+        position:absolute;inset:0;border-radius:50%;
+        background:rgba(215,25,33,0.2);
+        animation:sosping 1.1s infinite;
+      "></div>
+      <div style="
+        position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+        width:22px;height:22px;border-radius:50%;
+        background:#d71921;
+        border:3px solid #ffffff;
+        box-shadow:0 0 12px rgba(215,25,33,0.9);
+        display:flex;align-items:center;justify-content:center;
+        font-size:12px;line-height:1;
+      ">🚨</div>
+    </div>
+    <style>
+      @keyframes sosping{
+        0%  {transform:scale(1);  opacity:.9;}
+        70% {transform:scale(2.8);opacity:0; }
+        100%{transform:scale(1);  opacity:.9;}
+      }
+    </style>`,
+  iconSize:   [36, 36],
+  iconAnchor: [18, 18],
+  popupAnchor:[0, -22],
+  className:  ''
+});
 
 function timeAgo(timestamp) {
   const diff = Math.floor((Date.now() - new Date(timestamp)) / 1000);
@@ -117,17 +187,6 @@ function timeAgo(timestamp) {
   if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
   return `${Math.floor(diff/3600)}h ago`;
 }
-
-const sosDivIcon = L.divIcon({
-  html: `<div style="width:22px;height:22px;border-radius:50%;background:#d71921;
-    border:3px solid #ffffff;box-shadow:0 0 0 0 rgba(215,25,33,.8);
-    animation:sosping 1.2s infinite"></div>
-    <style>@keyframes sosping{0%{box-shadow:0 0 0 0 rgba(215,25,33,.8)}70%{box-shadow:0 0 0 16px rgba(215,25,33,0)}100%{box-shadow:0 0 0 0 rgba(215,25,33,0)}}</style>`,
-  iconSize:   [24, 24],
-  iconAnchor: [12, 12],
-  popupAnchor:[0, -14],
-  className: ''
-});
 
 export default function MapPage() {
   const leafletMap    = useRef(null);
@@ -205,10 +264,9 @@ export default function MapPage() {
           const { latitude: lat, longitude: lng } = pos.coords;
           setUserPos({ lat, lng });
           if (!userMarker.current) {
-            userMarker.current = L.circleMarker([lat, lng], {
-              radius: 9, fillColor: '#ffffff', color: '#d71921',
-              weight: 3, fillOpacity: 1
-            }).addTo(map).bindPopup('📍 Your Live Telemetry Location');
+            userMarker.current = L.marker([lat, lng], { icon: userDivIcon })
+              .addTo(map)
+              .bindPopup('<b style="color:#29b6f6">&#x1F4CD; Your Location</b><br><span style="font-size:12px;color:#888">Live GPS position</span>');
             map.setView([lat, lng], 13);
           } else {
             userMarker.current.setLatLng([lat, lng]);
