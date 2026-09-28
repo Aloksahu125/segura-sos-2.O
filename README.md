@@ -1,46 +1,21 @@
-<div align="center">
+<p align='center'>
+    <img src="https://capsule-render.vercel.app/api?type=rect&color=gradient&height=331&section=header&text=%F0%9F%9A%A8%20SEGURA%20SOS&textBg=false&fontColor=black&fontSize=70&animation=fadeIn&fontAlign=47&desc=Real-Time%20Crash%20Detection%20and%20Emergency%20Dispatch!&descSize=31&descAlign=51&descAlignY=65&strokeWidth=5"/>
+</p>
 
-<img src="https://capsule-render.vercel.app/api?type=rect&height=331&color=gradient&text=🚨%20SEGURA%20SOS&textBg=false&fontColor=black&fontSize=70&animation=fadeIn&fontAlign=47&desc=Real-Time%20Crash%20Detection%20%26%20Emergency%20Dispatch&descSize=31&descAlign=51&descAlignY=65&strokeWidth=5" />
+<p align="center">
+  <i><b>"Saving Lives in the Golden Hour Through Autonomous Crash Intelligence"</b></i>
+</p>
 
-![Node](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)
-![Twilio](https://img.shields.io/badge/Twilio-Emergency%20Calls-F22F46?style=for-the-badge&logo=twilio&logoColor=white)
+<p align="center">
+  An intelligent, end-to-end telemetry pipeline combining on-device sensor fusion, neural severity classification, automated telecom dispatch, and hyper-local community situational awareness.
+</p>
 
-</div>
-
----
-
-<div align="center">
-
-[![Render Deployment](https://img.shields.io/badge/Render-M2%20%26%20M3%20Live-46E3B7?style=for-the-badge&logo=render&logoColor=white)](https://segura-m3-sos-server.onrender.com)
-[![Vercel Deployment](https://img.shields.io/badge/Vercel-M1%20%26%20M4%20Live-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://segura-m4-community-app.vercel.app)
-[![Python](https://img.shields.io/badge/Python-3.10%2B%20%7C%20FastAPI-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://fastapi.tiangolo.com)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B%20%7C%20Express-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
-[![React](https://img.shields.io/badge/React-18%20%7C%20Vite-61DAFB?style=for-the-badge&logo=react&logoColor=black)](https://vitejs.dev)
-[![Twilio](https://img.shields.io/badge/Twilio-Automated%20Voice%20%26%20SMS-F22F46?style=for-the-badge&logo=twilio&logoColor=white)](https://www.twilio.com)
-
-<br />
-
-```
-  ███████╗███████╗ ██████╗ ██╗   ██╗██████╗  █████╗     ███████╗ ██████╗ ███████╗
-  ██╔════╝██╔════╝██╔════╝ ██║   ██║██╔══██╗██╔══██╗    ██╔════╝██╔═══██╗██╔════╝
-  ███████╗█████╗  ██║  ███╗██║   ██║██████╔╝███████║    ███████╗██║   ██║███████╗
-  ╚════██║██╔══╝  ██║   ██║██║   ██║██╔══██╗██╔══██║    ╚════██║██║   ██║╚════██║
-  ███████║███████╗╚██████╔╝╚██████╔╝██║  ██║██║  ██║    ███████║╚██████╔╝███████║
-  ╚══════╝╚══════╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝    ╚══════╝ ╚═════╝ ╚══════╝
-```
-
-### *"Saving Lives in the Golden Hour Through Autonomous Crash Intelligence"*
-
-**An intelligent, end-to-end telemetry pipeline combining on-device sensor fusion, neural severity classification, automated telecom dispatch, and hyper-local community situational awareness.**
-
-[🌐 Explore Live Deployment](#-live-cloud-deployments) • [⚡ Quick Local Setup](#-run-locally-on-your-laptop-in-5-minutes) • [🧠 System Architecture](#-system-architecture--3d-data-pipeline) • [📱 Real World Impact](#-why-segura-sos-real-world-impact)
-
----
-
-</div>
+<p align="center">
+  🌐 <a href="https://github.com/piyushlilhare123/segura-sos-2.O#-live-cloud-deployments">Explore Live Deployment</a> •
+  ⚡ <a href="https://github.com/piyushlilhare123/segura-sos-2.O#-run-locally-on-your-laptop-in-5-minutes">Quick Local Setup</a> •
+  🧠 <a href="https://github.com/piyushlilhare123/segura-sos-2.O#-system-architecture--3d-data-pipeline">System Architecture</a> •
+  📱 <a href="https://github.com/piyushlilhare123/segura-sos-2.O#-why-segura-sos-real-world-impact">Real World Impact</a>
+</p>
 
 ## 🌐 Live Cloud Deployments
 
