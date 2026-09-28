@@ -11,10 +11,6 @@
       "destination": "/index.html"
     }
   ],
-  "env": {
-    "VITE_M3_URL": "https://segura-m3-sos-server.onrender.com",
-    "VITE_M2_URL": "https://segura-m2-ai-engine.onrender.com"
-  },
   "headers": [
     {
       "source": "/(.*)",
