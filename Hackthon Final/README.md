@@ -1,4 +1,16 @@
-# 🚨 SEGURA SOS — Real-Time Accident Detection & Emergency Response System (ADRS)
+<div align="center">
+
+<img src="https://capsule-render.vercel.app/api?type=rect&height=331&color=gradient&text=🚨%20SEGURA%20SOS&textBg=false&fontColor=black&fontSize=70&animation=fadeIn&fontAlign=47&desc=Real-Time%20Crash%20Detection%20%26%20Emergency%20Dispatch&descSize=31&descAlign=51&descAlignY=65&strokeWidth=5" />
+
+![Node](https://img.shields.io/badge/Node.js-18%2B-339933?style=for-the-badge&logo=node.js&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-Backend-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18-61DAFB?style=for-the-badge&logo=react&logoColor=black)
+![Twilio](https://img.shields.io/badge/Twilio-Emergency%20Calls-F22F46?style=for-the-badge&logo=twilio&logoColor=white)
+
+</div>
+
+---
 
 <div align="center">
 

@@ -237,9 +237,12 @@ export default function MapPage() {
       ws.onmessage = (msg) => {
         try {
           const ev = JSON.parse(msg.data);
+          const sev = ev.severity || 'minor';
+
+          // ✅ Only plot on map and alert for ACTUAL CRASHES — ignore normal telemetry
+          if (sev !== 'severe' && sev !== 'moderate') return;
           if (!ev.lat || !ev.lng || !leafletMap.current) return;
 
-          const sev  = ev.severity || 'minor';
           const icon = icons[sev] || icons.minor;
           const time = new Date().toISOString();
 
@@ -247,7 +250,7 @@ export default function MapPage() {
             .addTo(leafletMap.current)
             .bindPopup(`
               <div style="font-family:'Space Grotesk',sans-serif;min-width:160px">
-                <b style="text-transform:uppercase;color:${sev==='severe'?'#d71921':sev==='moderate'?'#ff9800':'#10b981'}">${sev}</b>
+                <b style="text-transform:uppercase;color:${sev==='severe'?'#d71921':'#ff9800'}">${sev}</b>
                 <div style="margin-top:4px;font-size:12px;color:#888">${timeAgo(time)}</div>
                 <hr style="margin:6px 0;border-color:rgba(255,255,255,0.1)">
                 <div>🚗 ${ev.speed_kmh?.toFixed(0)} km/h</div>
@@ -262,14 +265,12 @@ export default function MapPage() {
             speed_kmh: ev.speed_kmh,
             impact_g:  ev.impact_g,
             lat: ev.lat, lng: ev.lng,
-            description: ev.alert_message || 'Auto-detected telemetry crash'
+            description: ev.alert_message || 'AI-detected crash event'
           }, ...prev].slice(0, 20));
 
-          // 🔊 Alert community users for moderate/severe M2 events too
-          if (sev === 'severe' || sev === 'moderate') {
-            playSOSAlert(sev);
-            showSOSToast(sev);
-          }
+          // 🔊 Alert community users for crash events
+          playSOSAlert(sev);
+          showSOSToast(sev);
 
         } catch (_) {}
       };
