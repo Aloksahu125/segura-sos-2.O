@@ -353,6 +353,33 @@ app.get('/incidents', async (req, res) => {
     }
 });
 
+// ── DELETE /clear-logs  (🗑 Demo reset — clears all logs & incidents) ────
+app.delete('/clear-logs', async (req, res) => {
+    console.log('[CLEAR LOGS] Wiping all SOS logs, incidents and telemetry...');
+    try {
+        if (dbConnected) {
+            await Promise.all([
+                SosLog.deleteMany({}),
+                Incident.deleteMany({}),
+                Telemetry.deleteMany({})
+            ]);
+        }
+        // Also clear in-memory fallback
+        _memSosLogs.length    = 0;
+        _memIncidents.length  = 0;
+
+        // Broadcast 'cleared' event so all connected M4 clients reset their UI
+        const msg = JSON.stringify({ type: 'cleared' });
+        wsClients.forEach(ws => { if (ws.readyState === ws.OPEN) ws.send(msg); });
+
+        console.log('[CLEAR LOGS] Done — all stores wiped.');
+        res.status(200).json({ success: true, message: 'All logs and incidents cleared.' });
+    } catch (e) {
+        console.error('[CLEAR LOGS] Error:', e.message);
+        res.status(500).json({ success: false, message: e.message });
+    }
+});
+
 // ── GET /api/nearby-hospitals ─────────────────────────────────
 app.get('/api/nearby-hospitals', async (req, res) => {
     const { lat, lng, radius } = req.query;

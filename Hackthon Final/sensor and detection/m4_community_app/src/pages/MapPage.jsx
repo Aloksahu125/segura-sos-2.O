@@ -135,6 +135,7 @@ export default function MapPage() {
   const hazardLayers  = useRef([]);
   const wsRef         = useRef(null);
   const m3WsRef       = useRef(null);
+  const crashMarkers  = useRef([]);  // track all crash/SOS pins for clearing
   const [incidents,   setIncidents]   = useState([]);
   const [sosAlerts,   setSosAlerts]   = useState([]);
   const [wsStatus,    setWsStatus]    = useState('Connecting…');
@@ -142,25 +143,51 @@ export default function MapPage() {
   const [userPos,     setUserPos]     = useState(null);
   const [filter,      setFilter]      = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [clearing,    setClearing]    = useState(false);
 
   const pinSosMarker = useCallback((entry) => {
     const p = entry.payload || {};
     const lat = p.gps?.lat ?? p.latitude;
     const lng = p.gps?.lng ?? p.longitude;
     if (!lat || !lng || !leafletMap.current) return;
-    L.marker([lat, lng], { icon: sosDivIcon })
+    const marker = L.marker([lat, lng], { icon: sosDivIcon })
       .addTo(leafletMap.current)
       .bindPopup(`
         <div style="font-family:'Space Grotesk',sans-serif;min-width:170px">
-          <b style="color:#d71921">🚨 SOS — ${(p.severity || 'severe').toUpperCase()}</b>
+          <b style="color:#d71921">&#x1F6A8; SOS &mdash; ${(p.severity || 'severe').toUpperCase()}</b>
           <div style="font-size:12px;color:#888;margin-top:3px">${timeAgo(entry.timestamp)}</div>
           <hr style="margin:6px 0;border-color:rgba(255,255,255,0.1)">
-          <div>📍 ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
-          ${p.speed_kmh != null ? `<div>🚗 ${Math.round(p.speed_kmh)} km/h</div>` : ''}
-          ${p.impact_g  != null ? `<div>⚡ ${p.impact_g.toFixed(2)} g</div>` : ''}
+          <div>&#x1F4CD; ${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
+          ${p.speed_kmh != null ? `<div>&#x1F697; ${Math.round(p.speed_kmh)} km/h</div>` : ''}
+          ${p.impact_g  != null ? `<div>&#x26A1; ${p.impact_g.toFixed(2)} g</div>` : ''}
         </div>
       `);
+    crashMarkers.current.push(marker);
   }, []);
+
+  // Clear everything on 'cleared' WS broadcast or button click
+  const clearAll = useCallback(() => {
+    setIncidents([]);
+    setSosAlerts([]);
+    // Remove all crash/SOS markers from map
+    crashMarkers.current.forEach(m => m.remove());
+    crashMarkers.current = [];
+  }, []);
+
+  const clearLogs = useCallback(async () => {
+    setClearing(true);
+    try {
+      await fetch(`${M3_HTTP_URL}/clear-logs`, { method: 'DELETE' });
+      clearAll();
+    } catch (e) {
+      console.error('Clear logs failed:', e);
+      // Still clear local state even if server fails
+      clearAll();
+    } finally {
+      setClearing(false);
+    }
+  }, [clearAll]);
+
 
   useEffect(() => {
     if (leafletMap.current) return;
@@ -246,17 +273,18 @@ export default function MapPage() {
           const icon = icons[sev] || icons.minor;
           const time = new Date().toISOString();
 
-          L.marker([ev.lat, ev.lng], { icon })
+          const marker = L.marker([ev.lat, ev.lng], { icon })
             .addTo(leafletMap.current)
             .bindPopup(`
               <div style="font-family:'Space Grotesk',sans-serif;min-width:160px">
                 <b style="text-transform:uppercase;color:${sev==='severe'?'#d71921':'#ff9800'}">${sev}</b>
                 <div style="margin-top:4px;font-size:12px;color:#888">${timeAgo(time)}</div>
                 <hr style="margin:6px 0;border-color:rgba(255,255,255,0.1)">
-                <div>🚗 ${ev.speed_kmh?.toFixed(0)} km/h</div>
-                <div>⚡ ${ev.impact_g?.toFixed(2)} g</div>
+                <div>&#x1F697; ${ev.speed_kmh?.toFixed(0)} km/h</div>
+                <div>&#x26A1; ${ev.impact_g?.toFixed(2)} g</div>
               </div>
             `);
+          crashMarkers.current.push(marker);
 
           setIncidents(prev => [{
             id:        ev.event_id || Date.now(),
@@ -294,6 +322,10 @@ export default function MapPage() {
       ws.onmessage = (msg) => {
         try {
           const packet = JSON.parse(msg.data);
+          if (packet.type === 'cleared') {
+            clearAll(); // another tab triggered a clear
+            return;
+          }
           if (packet.type === 'history') {
             const items = packet.data || [];
             items.forEach(entry => pinSosMarker(entry));
@@ -312,7 +344,7 @@ export default function MapPage() {
     }
     connectM3();
     return () => { alive = false; m3WsRef.current?.close(); };
-  }, [pinSosMarker]);
+  }, [pinSosMarker, clearAll]);
 
   const filteredIncidents = incidents.filter(inc => {
     if (filter === 'severe') return inc.severity === 'severe';
@@ -334,6 +366,29 @@ export default function MapPage() {
           <span className={`badge ${wsStatus === 'Live' ? 'badge-success' : 'badge-warning'}`}>
             M2: {wsStatus}
           </span>
+          <button
+            id="clear-logs-btn"
+            onClick={clearLogs}
+            disabled={clearing}
+            title="Clear all alerts & incidents (demo reset)"
+            style={{
+              background: clearing ? 'rgba(255,50,50,0.15)' : 'rgba(215,25,33,0.18)',
+              border: '1px solid rgba(215,25,33,0.45)',
+              color: '#ff6b6b',
+              borderRadius: '8px',
+              padding: '6px 14px',
+              cursor: clearing ? 'not-allowed' : 'pointer',
+              fontSize: '13px',
+              fontWeight: '600',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'all 0.2s',
+              fontFamily: 'inherit',
+            }}
+          >
+            {clearing ? '⏳ Clearing…' : '🗑 Clear Logs'}
+          </button>
         </div>
       </div>
 
