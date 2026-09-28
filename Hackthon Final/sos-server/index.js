@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const twilio = require('twilio');
@@ -5,6 +6,8 @@ const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const https = require('https');
+const mongoose = require('mongoose');
+const { SosLog, Incident, Telemetry } = require('./models');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,18 +17,30 @@ app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ── In-memory stores (declared early so WS handler can reference them) ──
-const incidents = [];
-const sosLogs = [];
-const telemetryLogs = [];
+// ── MongoDB Connection ─────────────────────────────────────────
+const MONGODB_URI = process.env.MONGODB_URI || '';
+let dbConnected = false;
 
-// ── Twilio Configuration — loaded from environment variables ──────
-// Set these in Render dashboard: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
-// TWILIO_FROM_NUMBER, EMERGENCY_SERVICES_NUMBER
-const TWILIO_ACCOUNT_SID         = process.env.TWILIO_ACCOUNT_SID         || '';
-const TWILIO_AUTH_TOKEN          = process.env.TWILIO_AUTH_TOKEN          || '';
-const TWILIO_FROM_NUMBER         = process.env.TWILIO_FROM_NUMBER         || '';
-const EMERGENCY_SERVICES_NUMBER  = process.env.EMERGENCY_SERVICES_NUMBER  || '';
+if (MONGODB_URI) {
+    mongoose.connect(MONGODB_URI)
+        .then(() => {
+            dbConnected = true;
+            console.log('✅ [MongoDB] Connected to Atlas');
+        })
+        .catch(err => console.error('❌ [MongoDB] Connection failed:', err.message));
+} else {
+    console.warn('⚠️  [MongoDB] MONGODB_URI not set — falling back to in-memory arrays');
+}
+
+// ── Fallback In-Memory Stores (used if DB not connected) ──────
+const _memSosLogs    = [];
+const _memIncidents  = [];
+
+// ── Twilio Configuration ───────────────────────────────────────
+const TWILIO_ACCOUNT_SID        = process.env.TWILIO_ACCOUNT_SID        || '';
+const TWILIO_AUTH_TOKEN         = process.env.TWILIO_AUTH_TOKEN         || '';
+const TWILIO_FROM_NUMBER        = process.env.TWILIO_FROM_NUMBER        || '';
+const EMERGENCY_SERVICES_NUMBER = process.env.EMERGENCY_SERVICES_NUMBER || '';
 
 let twilioClient;
 try {
@@ -40,7 +55,7 @@ try {
 const wss = new WebSocketServer({ server });
 const wsClients = new Set();
 
-wss.on('connection', (ws) => {
+wss.on('connection', async (ws) => {
     wsClients.add(ws);
     console.log(`[M3 WS] Client connected (total: ${wsClients.size})`);
     ws.on('close', () => {
@@ -48,8 +63,16 @@ wss.on('connection', (ws) => {
         console.log(`[M3 WS] Client disconnected (total: ${wsClients.size})`);
     });
     ws.on('error', (err) => console.error('[M3 WS] Error:', err.message));
+
     // Send last 5 SOS on connect so M4 has initial state
-    ws.send(JSON.stringify({ type: 'history', data: sosLogs.slice(0, 5) }));
+    try {
+        const recent = dbConnected
+            ? await SosLog.find().sort({ timestamp: -1 }).limit(5).lean()
+            : _memSosLogs.slice(0, 5);
+        ws.send(JSON.stringify({ type: 'history', data: recent }));
+    } catch (e) {
+        ws.send(JSON.stringify({ type: 'history', data: [] }));
+    }
 });
 
 function broadcastSOS(entry) {
@@ -60,7 +83,7 @@ function broadcastSOS(entry) {
 }
 
 let lastTwilioCallTime = 0;
-const TWILIO_COOLDOWN_MS = 60000; // 1 call per minute max
+const TWILIO_COOLDOWN_MS = 60000;
 
 // ── Haversine Distance (km) ───────────────────────────────────
 function haversineKm(lat1, lon1, lat2, lon2) {
@@ -100,61 +123,38 @@ async function findNearbyHospitals(lat, lng, radiusMeters = 10000) {
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
-                    const json = JSON.parse(data);
-                    const hospitals = (json.elements || [])
-                        .map(el => {
-                            const hLat = el.lat || el.center?.lat;
-                            const hLng = el.lon || el.center?.lon;
-                            if (!hLat || !hLng) return null;
-                            const dist = haversineKm(lat, lng, hLat, hLng);
-                            const etaMin = Math.round((dist / 30) * 60); // 30 km/h avg ambulance speed in Indian cities
-                            return {
-                                name: el.tags?.name || el.tags?.['name:en'] || 'Hospital',
-                                lat: hLat,
-                                lng: hLng,
-                                distance_km: parseFloat(dist.toFixed(2)),
-                                eta_minutes: etaMin < 1 ? 1 : etaMin,
-                                phone: el.tags?.phone || el.tags?.['contact:phone'] || null,
-                                emergency: el.tags?.emergency === 'yes'
-                            };
-                        })
-                        .filter(Boolean)
-                        .sort((a, b) => a.distance_km - b.distance_km)
-                        .slice(0, 5);
-                    console.log(`[HOSPITAL FINDER] Found ${hospitals.length} hospitals near ${lat},${lng}`);
+                    const parsed = JSON.parse(data);
+                    const hospitals = (parsed.elements || []).slice(0, 5).map(el => {
+                        const elLat = el.lat ?? el.center?.lat;
+                        const elLon = el.lon ?? el.center?.lon;
+                        return {
+                            name:     el.tags?.name || 'Hospital',
+                            type:     el.tags?.amenity || 'hospital',
+                            lat:      elLat,
+                            lng:      elLon,
+                            distance: (elLat && elLon) ? haversineKm(lat, lng, elLat, elLon).toFixed(2) : null,
+                            address:  el.tags?.['addr:full'] || el.tags?.['addr:street'] || null
+                        };
+                    }).filter(h => h.lat && h.lng)
+                      .sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
                     resolve(hospitals);
-                } catch (e) {
-                    console.error('[HOSPITAL FINDER] Parse error:', e.message);
-                    console.error('[HOSPITAL FINDER] Response (first 200 chars):', data.substring(0, 200));
+                } catch {
                     resolve([]);
                 }
             });
         });
-        req.on('error', (e) => {
-            console.error('[HOSPITAL FINDER] Network error:', e.message);
-            resolve([]);
-        });
-        req.on('timeout', () => {
-            req.destroy();
-            console.error('[HOSPITAL FINDER] Timeout');
-            resolve([]);
-        });
+        req.on('error',   () => resolve([]));
+        req.on('timeout', () => { req.destroy(); resolve([]); });
         req.write(postData);
         req.end();
     });
 }
 
+// ── Twilio Emergency Alert ─────────────────────────────────────
 async function sendTwilioAlert(payload) {
-    if (!twilioClient) {
-        console.log('[Twilio CALL] Skipping call alert, invalid or missing credentials.');
-        return;
-    }
-
+    if (!twilioClient) return;
     const now = Date.now();
-    if (now - lastTwilioCallTime < TWILIO_COOLDOWN_MS) {
-        console.log(`[Twilio CALL] Skipped due to rate limit (${Math.round((TWILIO_COOLDOWN_MS - (now - lastTwilioCallTime))/1000)}s remaining)`);
-        return;
-    }
+    if (now - lastTwilioCallTime < TWILIO_COOLDOWN_MS) return;
     lastTwilioCallTime = now;
 
     try {
@@ -162,7 +162,6 @@ async function sendTwilioAlert(payload) {
         const lng = payload.gps?.lng ?? payload.longitude ?? 'unknown';
         const severity = (payload.severity || 'severe').toUpperCase();
 
-        // TwiML spoken message for the emergency call
         const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Say voice="alice" language="en-IN">
@@ -186,34 +185,46 @@ async function sendTwilioAlert(payload) {
     }
 }
 
+// ── Helper: Save SOS to DB or Memory ──────────────────────────
+async function saveSosLog(entry) {
+    if (dbConnected) {
+        try {
+            await SosLog.create(entry);
+        } catch (e) {
+            // Duplicate id — update instead
+            if (e.code === 11000) {
+                await SosLog.findOneAndUpdate({ id: entry.id }, entry, { upsert: true });
+            } else {
+                console.error('[MongoDB] SosLog save error:', e.message);
+            }
+        }
+    } else {
+        _memSosLogs.unshift(entry);
+        if (_memSosLogs.length > 100) _memSosLogs.pop();
+    }
+}
+
 // ── POST /sos  (M2 AI Engine + web/React PWA clients) ─────────
 app.post('/sos', async (req, res) => {
     console.log('[SOS /sos RECEIVED]', req.body);
     const lat = req.body.gps?.lat ?? req.body.latitude;
     const lng = req.body.gps?.lng ?? req.body.longitude;
 
-    // Find nearby hospitals (non-blocking, with fallback)
     let hospitals = [];
-    if (lat && lng) {
-        hospitals = await findNearbyHospitals(lat, lng);
-    }
+    if (lat && lng) hospitals = await findNearbyHospitals(lat, lng);
 
     const entry = {
-        id: req.body.sos_id || Date.now().toString(),
-        timestamp: new Date().toISOString(),
-        status: 'sent',
-        source: req.body.source || 'm2_ai_engine',
-        payload: req.body,
-        hospitals: hospitals,
-        golden_hour_start: new Date().toISOString()
+        id:                req.body.sos_id || Date.now().toString(),
+        timestamp:         new Date(),
+        status:            'sent',
+        source:            req.body.source || 'm2_ai_engine',
+        payload:           req.body,
+        hospitals:         hospitals,
+        golden_hour_start: new Date()
     };
-    sosLogs.unshift(entry);
-    if (sosLogs.length > 100) sosLogs.pop();
 
-    // Real-time push to M4 via WebSocket
+    await saveSosLog(entry);
     broadcastSOS(entry);
-
-    // Trigger Twilio SMS async
     sendTwilioAlert(req.body);
 
     res.status(200).json({ success: true, received: true, message: 'SOS dispatched to emergency responders.', hospitals });
@@ -221,7 +232,6 @@ app.post('/sos', async (req, res) => {
 
 // ── POST /demo/trigger-sos  (Emergency test trigger button) ──────────
 app.post('/demo/trigger-sos', async (req, res) => {
-    // Indian road locations for realistic demo
     const locations = [
         { lat: 28.6139, lng: 77.2090, city: 'New Delhi' },
         { lat: 19.0760, lng: 72.8777, city: 'Mumbai' },
@@ -233,31 +243,29 @@ app.post('/demo/trigger-sos', async (req, res) => {
     const sosId = `demo-${Date.now()}`;
 
     const demoPayload = {
-        sos_id: sosId,
+        sos_id:    sosId,
         timestamp: new Date().toISOString(),
-        gps: { lat: loc.lat + (Math.random() - 0.5) * 0.05, lng: loc.lng + (Math.random() - 0.5) * 0.05, accuracy_m: 5 },
-        severity: 'severe',
-        speed_kmh: Math.floor(Math.random() * 40 + 70),   // 70–110 km/h
-        impact_g: parseFloat((Math.random() * 2 + 3.5).toFixed(2)), // 3.5–5.5 g
-        source: 'demo_trigger',
-        city: loc.city
+        gps:       { lat: loc.lat + (Math.random() - 0.5) * 0.05, lng: loc.lng + (Math.random() - 0.5) * 0.05, accuracy_m: 5 },
+        severity:  'severe',
+        speed_kmh: Math.floor(Math.random() * 40 + 70),
+        impact_g:  parseFloat((Math.random() * 2 + 3.5).toFixed(2)),
+        source:    'demo_trigger',
+        city:      loc.city
     };
 
-    // Find nearby hospitals for demo location
     const hospitals = await findNearbyHospitals(loc.lat, loc.lng);
 
     const entry = {
-        id: sosId,
-        timestamp: demoPayload.timestamp,
-        status: 'sent',
-        source: 'demo_trigger',
-        payload: demoPayload,
-        hospitals: hospitals,
-        golden_hour_start: new Date().toISOString()
+        id:                sosId,
+        timestamp:         new Date(),
+        status:            'sent',
+        source:            'demo_trigger',
+        payload:           demoPayload,
+        hospitals:         hospitals,
+        golden_hour_start: new Date()
     };
-    sosLogs.unshift(entry);
-    if (sosLogs.length > 100) sosLogs.pop();
 
+    await saveSosLog(entry);
     broadcastSOS(entry);
     sendTwilioAlert(demoPayload);
 
@@ -272,89 +280,95 @@ app.post('/api/v1/sos', async (req, res) => {
     const lng = req.body.gps?.lng ?? req.body.longitude;
 
     let hospitals = [];
-    if (lat && lng) {
-        hospitals = await findNearbyHospitals(lat, lng);
-    }
+    if (lat && lng) hospitals = await findNearbyHospitals(lat, lng);
 
     const entry = {
-        id: req.body.recordId || req.body.sos_id || Date.now().toString(),
-        timestamp: new Date().toISOString(),
-        status: 'sent',
-        source: 'android',
-        payload: req.body,
-        hospitals: hospitals,
-        golden_hour_start: new Date().toISOString()
+        id:                req.body.recordId || req.body.sos_id || Date.now().toString(),
+        timestamp:         new Date(),
+        status:            'sent',
+        source:            'android',
+        payload:           req.body,
+        hospitals:         hospitals,
+        golden_hour_start: new Date()
     };
-    sosLogs.unshift(entry);
-    if (sosLogs.length > 100) sosLogs.pop();
 
-    // Real-time push to M4 via WebSocket
+    await saveSosLog(entry);
     broadcastSOS(entry);
-
-    // Trigger Twilio SMS async
     sendTwilioAlert(req.body);
 
     res.status(200).json({ success: true, received: true, message: 'SOS dispatched to emergency responders.', hospitals });
 });
 
 // ── POST /api/v1/telemetry (M1 Android Telemetry) ─────────────
-app.post('/api/v1/telemetry', (req, res) => {
-    // console.log('[TELEMETRY]', req.body); // Uncomment to see live stream, it's very noisy
-    const entry = {
-        timestamp: new Date().toISOString(),
-        ...req.body
-    };
-    telemetryLogs.unshift(entry);
-    if (telemetryLogs.length > 500) telemetryLogs.pop();
+app.post('/api/v1/telemetry', async (req, res) => {
+    const entry = { timestamp: new Date(), data: req.body };
+    if (dbConnected) {
+        try { await Telemetry.create(entry); } catch (e) {}
+    }
     res.status(200).json({ received: true });
 });
 
-// ── GET /sos-logs  (React SOS history screen) ─────────────────
-app.get('/sos-logs', (req, res) => {
-    res.status(200).json({
-        status: 'success',
-        count: sosLogs.length,
-        data: sosLogs.slice(0, 10)   // last 10
-    });
+// ── GET /sos-logs  (SOS history) ──────────────────────────────
+app.get('/sos-logs', async (req, res) => {
+    try {
+        const logs = dbConnected
+            ? await SosLog.find().sort({ timestamp: -1 }).limit(20).lean()
+            : _memSosLogs.slice(0, 20);
+        res.status(200).json({ status: 'success', count: logs.length, data: logs });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
 });
 
 // ── POST /incident  (M4 community report form) ────────────────
-app.post('/incident', (req, res) => {
+app.post('/incident', async (req, res) => {
     console.log('[INCIDENT REPORTED]', req.body);
     const newIncident = {
-        id: (typeof crypto !== 'undefined' && crypto.randomUUID)
-            ? crypto.randomUUID()
-            : Date.now().toString(),
-        timestamp: new Date().toISOString(),
+        id:        (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Date.now().toString(),
+        timestamp: new Date(),
         ...req.body
     };
-    incidents.unshift(newIncident);
-    if (incidents.length > 200) incidents.pop();
+
+    if (dbConnected) {
+        try { await Incident.create(newIncident); } catch (e) {
+            console.error('[MongoDB] Incident save error:', e.message);
+        }
+    } else {
+        _memIncidents.unshift(newIncident);
+        if (_memIncidents.length > 200) _memIncidents.pop();
+    }
+
     res.status(201).json({ success: true, incident: newIncident });
 });
 
-// ── GET /incidents  (M4 map & community feed) ─────────────────
-app.get('/incidents', (req, res) => {
-    res.status(200).json({ status: 'success', count: incidents.length, data: incidents });
+// ── GET /incidents  (M4 map & community feed) ──────────────────
+app.get('/incidents', async (req, res) => {
+    try {
+        const data = dbConnected
+            ? await Incident.find().sort({ timestamp: -1 }).limit(100).lean()
+            : _memIncidents;
+        res.status(200).json({ status: 'success', count: data.length, data });
+    } catch (e) {
+        res.status(500).json({ status: 'error', message: e.message });
+    }
 });
 
-// ── GET /api/nearby-hospitals  (standalone hospital lookup) ────
+// ── GET /api/nearby-hospitals ─────────────────────────────────
 app.get('/api/nearby-hospitals', async (req, res) => {
     const { lat, lng, radius } = req.query;
-    if (!lat || !lng) {
-        return res.status(400).json({ error: 'lat and lng query parameters are required' });
-    }
-    const hospitals = await findNearbyHospitals(
-        parseFloat(lat),
-        parseFloat(lng),
-        parseInt(radius) || 10000
-    );
+    if (!lat || !lng) return res.status(400).json({ error: 'lat and lng are required' });
+    const hospitals = await findNearbyHospitals(parseFloat(lat), parseFloat(lng), parseInt(radius) || 10000);
     res.status(200).json({ status: 'success', count: hospitals.length, hospitals });
 });
 
 // ── GET /health ───────────────────────────────────────────────
 app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', module: 'M3 SOS Server', port: PORT });
+    res.status(200).json({
+        status:   'ok',
+        module:   'M3 SOS Server',
+        port:     PORT,
+        database: dbConnected ? 'MongoDB Atlas' : 'In-Memory (no MONGODB_URI set)'
+    });
 });
 
 // ── Start ─────────────────────────────────────────────────────
@@ -363,19 +377,18 @@ server.listen(PORT, () => {
 ${'─'.repeat(60)}
   Segura SOS — M3 SOS Server  http://localhost:${PORT}
 ${'─'.repeat(60)}`);
-    console.log(`  GET  /                → 🎛  SOS Dashboard (presenter view)`);
-    console.log(`  WS   ws://localhost:${PORT}/     → M4 real-time SOS broadcast`);
     console.log(`  POST /sos             → M2 AI Engine SOS dispatch`);
     console.log(`  POST /demo/trigger-sos→ 🎯 Emergency test trigger`);
-    console.log(`  GET  /sos-logs        → SOS history (last 10)`);
+    console.log(`  GET  /sos-logs        → SOS history (last 20)`);
     console.log(`  POST /incident        → Community report`);
-    console.log(`  GET  /incidents       → All incidents`);
+    console.log(`  GET  /incidents       → All incidents (last 100)`);
     console.log(`  GET  /health          → Health check`);
     console.log('─'.repeat(60));
     if (!twilioClient) {
-        console.log(`  ⚠  Twilio: set env vars TWILIO_ACCOUNT_SID / AUTH_TOKEN for live SMS calls.`);
+        console.log(`  ⚠  Twilio: set env vars for live SMS/calls.`);
     } else {
         console.log(`  ✓  Twilio configured — emergency SMS/call active.`);
     }
+    console.log(`  🗄  Database: ${dbConnected ? 'MongoDB Atlas ✅' : 'In-Memory ⚠️  (set MONGODB_URI)'}`);
     console.log('─'.repeat(60) + '\n');
 });
